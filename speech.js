@@ -173,5 +173,18 @@
     });
   }
 
-  global.Speech = { voices, genderOf, speak, cancel, unlock, cleanForSpeech, waitForSpeechEnd, supported: !!synth };
+  // 同じ名前の声（Kyoko の標準版と高品質版など）を見分けるための表示名
+  function labelOf(voice) {
+    const id = `${voice.voiceURI} ${voice.name}`;
+    let quality = '';
+    if (/premium/i.test(id)) quality = '高品質';
+    else if (/enhanced|拡張/i.test(id)) quality = '拡張';
+    else if (/compact/i.test(id)) quality = '標準';
+    const g = genderOf(voice);
+    const gender = g === 'm' ? '男性' : g === 'f' ? '女性' : '';
+    const extra = [gender, quality].filter(Boolean).join('・');
+    return extra ? `${voice.name}（${extra}）` : voice.name;
+  }
+
+  global.Speech = { voices, genderOf, labelOf, speak, cancel, unlock, cleanForSpeech, waitForSpeechEnd, supported: !!synth };
 })(window);

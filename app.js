@@ -424,7 +424,7 @@
 
         <details class="voices">
           <summary>声の設定（役ごと）</summary>
-          <p class="hint">この端末で使える日本語の声: ${voices.length ? esc(voices.map(v => v.name).join('、')) : 'なし'}</p>
+          <p class="hint">この端末で使える日本語の声（${voices.length}種類）: ${voices.length ? esc(voices.map(v => Speech.labelOf(v)).join('、')) : 'なし'}</p>
           <details class="voice-help">
             <summary>声の種類を増やすには</summary>
             <p><b>iPhone・iPad</b><br>
@@ -441,7 +441,7 @@
             return `<div class="voice-row" data-char="${esc(c)}">
               <span class="vname">${c === '__direction' ? 'ト書き' : esc(c)}</span>
               ${typeSel}
-              <select data-k="uri"><option value="">声おまかせ</option>${voices.map(v => `<option value="${esc(v.voiceURI)}" ${conf.uri === v.voiceURI ? 'selected' : ''}>${esc(v.name)}${Speech.genderOf(v) === 'm' ? '（男性）' : Speech.genderOf(v) === 'f' ? '（女性）' : ''}</option>`).join('')}</select>
+              <select data-k="uri"><option value="">声おまかせ</option>${voices.map(v => `<option value="${esc(v.voiceURI)}" ${conf.uri === v.voiceURI ? 'selected' : ''}>${esc(Speech.labelOf(v))}</option>`).join('')}</select>
               <button type="button" class="btn small test">試聴</button>
             </div>`;
           }).join('')}
