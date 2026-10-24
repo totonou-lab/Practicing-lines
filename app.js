@@ -253,6 +253,20 @@
     return script.lines.reduce((m, l) => Math.max(m, l.page || 0), 0);
   }
 
+  // 登録した読み方に置き換えた文（読み上げ用）。長い言葉から先に置き換える
+  function readAs(script, text) {
+    const list = (script.readings || []).slice().sort((a, b) => b.word.length - a.word.length);
+    for (const r of list) text = text.split(r.word).join(r.reading);
+    return text;
+  }
+
+  // 台本の中にその言葉が何か所あるか
+  function countIn(script, word) {
+    let n = 0;
+    for (const l of script.lines) n += l.text.split(word).length - 1;
+    return n;
+  }
+
   // マーカーの表示名。名前を付けていなければセリフの場所を使う
   function markerLabel(l) {
     return l.markerName || shortText(l);
@@ -363,6 +377,27 @@
           }).join('')}
         </details>
 
+        <details class="readings" id="readings">
+          <summary>📖 読み方の登録（${(script.readings || []).length}）</summary>
+          <p class="hint">読み間違える言葉と正しい読み方を登録すると、この台本の中の同じ言葉を全部その読み方で読み上げます。画面に表示される文字は変わりません。</p>
+          <ul>${(script.readings || []).map(r => `
+            <li data-word="${esc(r.word)}">
+              <div class="rd-text"><b>${esc(r.word)}</b> → ${esc(r.reading)}<small>${countIn(script, r.word)}か所</small></div>
+              <button type="button" class="btn small rd-test">試聴</button>
+              <button type="button" class="btn small danger rd-delete">削除</button>
+            </li>`).join('')}
+          </ul>
+          <div class="rd-form">
+            <label>言葉（台本のとおりに）<input id="rd-word" placeholder="例：氏家"></label>
+            <label>読み方（ひらがな・カタカナ）<input id="rd-reading" placeholder="例：うじいえ"></label>
+            <p class="hint" id="rd-count"></p>
+            <div class="rd-btns">
+              <button type="button" class="btn small" id="rd-try">試聴</button>
+              <button type="button" class="btn small primary" id="rd-add">登録する</button>
+            </div>
+          </div>
+        </details>
+
         <h2>練習する範囲</h2>
         <div class="range-box">
           <label class="field">始める場所
@@ -403,8 +438,11 @@
                 <span class="mk-name">${esc(markerLabel(l))}</span>
                 ${l.markerName ? `<span class="mk-where">${esc(shortText(l))}</span>` : ''}
               </div>
-              <button type="button" class="btn small mk-rename">名前</button>
-              <button type="button" class="btn small danger mk-delete">削除</button>
+              <div class="mk-btns">
+                <button type="button" class="btn small primary mk-play">▶ ここから練習</button>
+                <button type="button" class="btn small mk-rename">名前</button>
+                <button type="button" class="btn small danger mk-delete">削除</button>
+              </div>
             </li>`).join('')}
           </ul>
           <button type="button" class="btn small danger" id="mk-clear">すべて削除</button>
@@ -437,6 +475,12 @@
     const lineById = id => script.lines.find(l => l.id === id);
     view.querySelectorAll('.markers li[data-id]').forEach(li => {
       const line = lineById(parseInt(li.dataset.id, 10));
+      li.querySelector('.mk-play').addEventListener('click', () => {
+        // 「始める場所」をこのマーカーにして、そのまま練習を始める
+        startKind.value = 'marker';
+        $('#start-marker').value = String(line.id);
+        $('#go').click();
+      });
       li.querySelector('.mk-rename').addEventListener('click', async () => {
         const name = prompt('マーカーの名前（空にすると、セリフの場所を表示します）', line.markerName || '');
         if (name === null) return;
@@ -512,8 +556,53 @@
         Speech.cancel();
         const sample = c === '__direction' ? 'ト書きはこの声で読みます。' :
           (script.lines.find(l => l.type === 'speech' && l.speakers.includes(c)) || { text: 'よろしくお願いします。' }).text;
-        Speech.speak(sample, voiceFor(script, c));
+        Speech.speak(readAs(script, sample), voiceFor(script, c));
       });
+    });
+
+    // 読み方の登録
+    const readingsBox = $('#readings');
+    const rerenderReadings = () => {
+      rerender();
+      if ($('#readings')) $('#readings').open = true;
+    };
+    readingsBox.querySelectorAll('li[data-word]').forEach(li => {
+      const word = li.dataset.word;
+      li.querySelector('.rd-test').addEventListener('click', () => {
+        Speech.cancel();
+        Speech.speak(readAs(script, word), voiceFor(script, '__direction'));
+      });
+      li.querySelector('.rd-delete').addEventListener('click', async () => {
+        const i = script.readings.findIndex(r => r.word === word);
+        const removed = script.readings.splice(i, 1)[0];
+        await save(script);
+        rerenderReadings();
+        toast(`「${word}」の読み方を削除しました`, {
+          label: '元に戻す',
+          run: async () => { script.readings.splice(i, 0, removed); await save(script); rerenderReadings(); },
+        });
+      });
+    });
+    const rdWord = $('#rd-word'), rdReading = $('#rd-reading');
+    const rdCount = () => {
+      const w = rdWord.value.trim();
+      $('#rd-count').textContent = w ? `台本の中に${countIn(script, w)}か所あります` : '';
+    };
+    rdWord.addEventListener('input', rdCount);
+    $('#rd-try').addEventListener('click', () => {
+      Speech.cancel();
+      Speech.speak(rdReading.value.trim() || rdWord.value.trim(), voiceFor(script, '__direction'));
+    });
+    $('#rd-add').addEventListener('click', async () => {
+      const word = rdWord.value.trim(), reading = rdReading.value.trim();
+      if (!word || !reading) { alert('「言葉」と「読み方」の両方を入れてください'); return; }
+      script.readings = script.readings || [];
+      const found = script.readings.find(r => r.word === word);
+      if (found) found.reading = reading;
+      else script.readings.push({ word, reading });
+      await save(script);
+      rerenderReadings();
+      toast(`「${word}」を「${reading}」と読みます（${countIn(script, word)}か所）`);
     });
 
     const startKind = $('#start-kind'), endKind = $('#end-kind');
@@ -582,7 +671,7 @@
     setHeader('台本の確認・修正', `#/s/${script.id}`);
     view.innerHTML = `
       <section class="edit">
-        <p class="hint">行をタップすると、種類（セリフ／ト書き）や役名、文章を直せます。読み方がおかしい言葉は、ひらがなに書き換えると正しく読まれます。</p>
+        <p class="hint">行をタップすると、種類（セリフ／ト書き）や役名、文章を直せます。何度も出てくる言葉の読み方は、設定画面の「📖 読み方の登録」でまとめて直せます。</p>
         <div class="row-btns">
           <button type="button" class="btn" id="merge-name">役名をまとめる・変える</button>
           ${undoButtonHtml(script)}
@@ -976,14 +1065,14 @@
     async perform(line, run) {
       const s = this.s;
       if (line.type !== 'speech') {
-        await Speech.speak(line.text, voiceFor(this.script, '__direction'));
+        await Speech.speak(readAs(this.script, line.text), voiceFor(this.script, '__direction'));
         return;
       }
       // セリフの中の（カッコ書き）はト書きなので、ト書きを飛ばすときは読まない
       const text = s.readDirections ? line.text : line.text.replace(/[（(][^）)]*[）)]/g, '');
       const mine = isMine(this.script, line);
       if (!mine || s.readMine || !s.myChars.length) {
-        await Speech.speak(text, voiceFor(this.script, line.speakers[0]));
+        await Speech.speak(readAs(this.script, text), voiceFor(this.script, line.speakers[0]));
         return;
       }
       await this.myTurn(line, text, run);

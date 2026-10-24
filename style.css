@@ -140,11 +140,25 @@ select.full { width: 100%; min-height: 44px; padding: 8px; border: 1px solid var
 .voice-row select { min-width: 0; min-height: 36px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 4px; }
 .voice-row .test { grid-row: 2 / 4; grid-column: 2; align-self: center; }
 
+.readings { margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 12px 12px; }
+.readings summary { cursor: pointer; padding: 10px 0 6px; font-weight: 600; font-size: 15px; }
+.readings ul { list-style: none; padding: 0; margin: 0; }
+.readings li { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
+.readings .rd-text { flex: 1; min-width: 0; font-size: 15px; overflow-wrap: anywhere; }
+.readings .rd-text small { display: block; font-size: 12px; color: var(--muted); }
+.readings .btn.small { flex: none; padding: 4px 10px; }
+.rd-form { border-top: 1px solid var(--line); padding-top: 8px; }
+.rd-form label { display: block; font-size: 13px; color: var(--muted); margin: 6px 0; }
+.rd-form input { display: block; width: 100%; margin-top: 4px; min-height: 44px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font-size: 16px; }
+.rd-btns { display: flex; gap: 8px; justify-content: flex-end; }
+.rd-btns #rd-add { flex: 1; }
+
 .markers { margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 12px 12px; }
 .markers summary { cursor: pointer; padding: 10px 0 6px; font-weight: 600; font-size: 15px; }
 .markers ul { list-style: none; padding: 0; margin: 0 0 10px; }
-.markers li { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
-.markers .mk-text { flex: 1; min-width: 0; }
+.markers li { padding: 10px 0; border-top: 1px solid var(--line); }
+.markers .mk-btns { display: flex; gap: 6px; margin-top: 8px; }
+.markers .mk-btns .mk-play { flex: 1; }
 .markers .mk-name { display: block; font-size: 14px; overflow-wrap: anywhere; }
 .markers .mk-where { display: block; font-size: 12px; color: var(--muted); }
 .markers .btn.small { flex: none; padding: 4px 10px; }
