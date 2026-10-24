@@ -93,6 +93,28 @@ main { max-width: 720px; margin: 0 auto; padding: 16px 16px calc(32px + var(--sa
 .script-list .meta { display: block; color: var(--muted); font-size: 13px; }
 .script-list .empty { color: var(--muted); text-align: center; padding: 32px 0; }
 
+/* 使い方 */
+.help { font-size: 15px; }
+.help .lead { font-size: 16px; margin: 4px 0 8px; }
+.help h2 { display: flex; align-items: center; gap: 10px; font-size: 17px; margin: 28px 0 10px; }
+.help h2 span {
+  flex: none; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--accent); color: #fff; font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.help p { margin: 6px 0; }
+.help ul { margin: 6px 0; padding-left: 20px; }
+.help li { margin: 4px 0; }
+.help .note { background: var(--mine); border-radius: 8px; padding: 8px 12px; font-size: 14px; }
+.help dl { margin: 6px 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.help dt { font-weight: 700; padding: 10px 12px 0; }
+.help dd { margin: 0; padding: 2px 12px 10px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.help dd:last-child { border-bottom: 0; }
+.help .keys { display: grid; grid-template-columns: auto 1fr; }
+.help .keys dt { padding: 10px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.help .keys dd { padding: 10px 12px 10px 0; }
+.help .keys dt:nth-last-of-type(1) { border-bottom: 0; }
+
 /* 開き方の説明 */
 .howto { margin-top: 24px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 14px; font-size: 14px; }
 .howto summary { cursor: pointer; padding: 10px 0; font-weight: 600; font-size: 15px; }
