@@ -18,17 +18,41 @@
     timeFactor: 1.0,      // 時間で判断するときの待ち時間の倍率
     voices: {},           // 役ごとの声 { 役名: { uri, pitch } }
     position: 0,
+    // 練習する範囲
+    startKind: 'top',     // top / resume / scene / page / marker
+    startScene: null,     // 場面の行 id
+    startPage: 1,
+    startMarker: null,    // マーカーの行 id
+    endKind: 'end',       // end / scene / marker / page
+    endPage: 1,
+    rangeStart: 0,        // 実際に練習する範囲（行番号）
+    stopAt: null,
   };
   const PITCHES = [1.0, 0.8, 1.2, 0.9, 1.1, 0.75, 1.3];
+  // 声のタイプ: 声の性別・高さ・速さの組み合わせ
+  const VOICE_TYPES = {
+    child_m: { label: '男の子', gender: 'm', pitch: 1.5, rate: 1.1 },
+    child_f: { label: '女の子', gender: 'f', pitch: 1.6, rate: 1.1 },
+    young_m: { label: '若い男性', gender: 'm', pitch: 1.15, rate: 1.05 },
+    young_f: { label: '若い女性', gender: 'f', pitch: 1.2, rate: 1.05 },
+    adult_m: { label: '大人の男性', gender: 'm', pitch: 0.9, rate: 1.0 },
+    adult_f: { label: '大人の女性', gender: 'f', pitch: 0.95, rate: 1.0 },
+    old_m: { label: 'おじいさん', gender: 'm', pitch: 0.7, rate: 0.85 },
+    old_f: { label: 'おばあさん', gender: 'f', pitch: 0.8, rate: 0.85 },
+  };
   const TYPE_LABEL = { speech: 'セリフ', direction: 'ト書き', scene: '場面', skip: '読まない' };
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  // 足りない設定を初期値で埋める。画面の各所が同じ設定を書き換えられるよう、同じものを返す
   function settingsOf(script) {
-    script.settings = Object.assign({}, DEFAULTS, script.settings || {});
-    return script.settings;
+    const s = script.settings = script.settings || {};
+    for (const [k, v] of Object.entries(DEFAULTS)) {
+      if (!(k in s)) s[k] = v && typeof v === 'object' ? JSON.parse(JSON.stringify(v)) : v;
+    }
+    return s;
   }
 
   function toast(msg) {
@@ -39,10 +63,14 @@
     toast.timer = setTimeout(() => t.classList.remove('show'), 3000);
   }
 
-  function setHeader(title, backHash) {
+  function setHeader(title, backHash, settingsHash) {
     titleEl.textContent = title;
     backBtn.hidden = !backHash;
     backBtn.onclick = () => { location.hash = backHash; };
+    const gear = $('#settings');
+    gear.hidden = !settingsHash;
+    gear.onclick = null;
+    if (settingsHash) gear.href = settingsHash;
   }
 
   async function save(script) {
@@ -88,6 +116,10 @@
     }
   }
   window.addEventListener('hashchange', route);
+  // 声の一覧が後から届いたら、設定画面を描き直す
+  window.addEventListener('voices-updated', () => {
+    if (/^#\/s\/[^/]+$/.test(location.hash) && !$('#dialog').open) route();
+  });
 
   // ---------- ホーム（台本の一覧） ----------
 
@@ -158,13 +190,54 @@
       return { voiceURI: uri || (list[0] && list[0].voiceURI), pitch: pitch || 1, rate: s.rate * 1.05 };
     }
     const idx = Math.max(0, script.characters.indexOf(name));
+    const type = VOICE_TYPES[conf.type];
+    if (type) {
+      // タイプに合う性別の声を選ぶ。無ければ今ある声の高さを変えて近づける
+      if (!uri) {
+        const matches = list.filter(v => Speech.genderOf(v) === type.gender);
+        const pick = matches.length ? matches : list;
+        if (pick.length) uri = pick[idx % pick.length].voiceURI;
+      }
+      const v = list.find(x => x.voiceURI === uri);
+      const gender = v ? Speech.genderOf(v) : null;
+      let p = type.pitch;
+      const child = conf.type.startsWith('child');
+      if (type.gender === 'm' && gender === 'f' && !child) p *= 0.7;
+      if (type.gender === 'f' && gender === 'm') p *= 1.3;
+      return { voiceURI: uri, pitch: Math.min(2, p), rate: s.rate * type.rate };
+    }
     if (!uri && list.length) uri = list[idx % list.length].voiceURI;
     if (!pitch) pitch = PITCHES[idx % PITCHES.length];
     return { voiceURI: uri, pitch, rate: s.rate };
   }
 
-  function sceneOptions(script) {
-    return script.lines.map((l, i) => [l, i]).filter(([l]) => l.type === 'scene');
+  function maxPage(script) {
+    return script.lines.reduce((m, l) => Math.max(m, l.page || 0), 0);
+  }
+
+  function shortText(l) {
+    const t = l.text.length > 18 ? l.text.slice(0, 18) + '…' : l.text;
+    return (l.page ? `p.${l.page} ` : '') + (l.speakers.length ? l.speakers.join('・') + '：' : '') + t;
+  }
+
+  // 設定から、練習を始める行と止める行（この行の手前で止まる）を決める
+  function computeRange(script) {
+    const s = settingsOf(script);
+    const lines = script.lines;
+    const byId = id => lines.findIndex(l => l.id === id);
+    let start = 0;
+    if (s.startKind === 'resume') start = s.position || 0;
+    else if (s.startKind === 'scene') start = byId(s.startScene);
+    else if (s.startKind === 'marker') start = byId(s.startMarker);
+    else if (s.startKind === 'page') start = lines.findIndex(l => (l.page || 0) >= s.startPage);
+    start = Math.max(0, Math.min(start, lines.length - 1));
+
+    const after = pred => { const i = lines.findIndex((l, j) => j > start && pred(l)); return i < 0 ? lines.length : i; };
+    let stop = lines.length;
+    if (s.endKind === 'scene') stop = after(l => l.type === 'scene');
+    else if (s.endKind === 'marker') stop = after(l => l.marker);
+    else if (s.endKind === 'page') stop = after(l => (l.page || 0) > s.endPage);
+    return { start, stop };
   }
 
   function renderSetup(script) {
@@ -173,8 +246,17 @@
     const counts = {};
     for (const l of script.lines) if (l.type === 'speech') for (const c of l.speakers) counts[c] = (counts[c] || 0) + 1;
     const voices = Speech.voices();
-    const scenes = sceneOptions(script);
+    const scenes = script.lines.filter(l => l.type === 'scene');
+    const markers = script.lines.filter(l => l.marker);
+    const pages = maxPage(script);
     const pos = Math.min(s.position, script.lines.length - 1);
+    const posLine = script.lines[pos];
+    // 選べなくなった項目（マーカーを全部外した等）は「最初から」に戻す
+    const available = { top: true, resume: pos > 0, scene: scenes.length > 0, page: pages > 1, marker: markers.length > 0 };
+    if (!available[s.startKind]) s.startKind = 'top';
+    if (!{ end: true, scene: available.scene, marker: available.marker, page: available.page }[s.endKind]) s.endKind = 'end';
+    if (!scenes.some(l => l.id === s.startScene)) s.startScene = scenes[0] && scenes[0].id;
+    if (!markers.some(l => l.id === s.startMarker)) s.startMarker = markers[0] && markers[0].id;
 
     view.innerHTML = `
       <section class="setup">
@@ -210,24 +292,59 @@
 
         <details class="voices">
           <summary>声の設定（役ごと）</summary>
-          ${voices.length ? '' : '<p class="hint">この端末で日本語の声が見つかりません。端末の設定で日本語の音声を追加してください。</p>'}
+          <p class="hint">この端末で使える日本語の声: ${voices.length ? esc(voices.map(v => v.name).join('、')) : 'なし'}</p>
+          <details class="voice-help">
+            <summary>声の種類を増やすには</summary>
+            <p><b>iPhone・iPad</b><br>
+            「設定」→「アクセシビリティ」→「読み上げコンテンツ」→「声」→「日本語」と進み、Otoya（男性）・Hattori（男性）・O-ren（女性）などをダウンロードします。「拡張」「高品質」と書かれた声は、より自然です。<br>
+            ダウンロード後、このアプリを一度完全に閉じてから開き直してください。</p>
+            <p><b>Android</b><br>
+            「設定」→「ユーザー補助」→「テキスト読み上げの出力」から、日本語の音声データを追加できます（機種によって名前が違います）。</p>
+            <p>声が1種類しかなくても、「声のタイプ」で高さと速さを変えて演じ分けます。</p>
+          </details>
           ${['__direction', ...script.characters].map(c => {
             const conf = s.voices[c] || {};
+            const typeSel = c === '__direction' ? '' :
+              `<select data-k="type"><option value="">タイプおまかせ</option>${Object.entries(VOICE_TYPES).map(([k, t]) => `<option value="${k}" ${conf.type === k ? 'selected' : ''}>${t.label}</option>`).join('')}</select>`;
             return `<div class="voice-row" data-char="${esc(c)}">
               <span class="vname">${c === '__direction' ? 'ト書き' : esc(c)}</span>
-              <select data-k="uri"><option value="">おまかせ</option>${voices.map(v => `<option value="${esc(v.voiceURI)}" ${conf.uri === v.voiceURI ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select>
-              <select data-k="pitch"><option value="">高さおまかせ</option>${[[0.7, '低い'], [0.85, 'やや低い'], [1, 'ふつう'], [1.15, 'やや高い'], [1.3, '高い']].map(([v, l]) => `<option value="${v}" ${conf.pitch === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+              ${typeSel}
+              <select data-k="uri"><option value="">声おまかせ</option>${voices.map(v => `<option value="${esc(v.voiceURI)}" ${conf.uri === v.voiceURI ? 'selected' : ''}>${esc(v.name)}${Speech.genderOf(v) === 'm' ? '（男性）' : Speech.genderOf(v) === 'f' ? '（女性）' : ''}</option>`).join('')}</select>
               <button type="button" class="btn small test">試聴</button>
             </div>`;
           }).join('')}
         </details>
 
-        <h2>どこから始める？</h2>
-        <select id="start" class="full">
-          <option value="0">最初から</option>
-          ${pos > 0 ? `<option value="${pos}" selected>続きから（${pos + 1}行目）</option>` : ''}
-          ${scenes.map(([l, i]) => `<option value="${i}">${esc(l.text)}</option>`).join('')}
-        </select>
+        <h2>練習する範囲</h2>
+        <div class="range-box">
+          <label class="field">始める場所
+            <select id="start-kind" class="full">
+              <option value="top">最初から</option>
+              ${available.resume ? `<option value="resume">続きから（${esc(shortText(posLine))}）</option>` : ''}
+              ${available.scene ? '<option value="scene">場面を選ぶ</option>' : ''}
+              ${available.page ? '<option value="page">ページを指定</option>' : ''}
+              ${available.marker ? '<option value="marker">🔖 マーカーから</option>' : ''}
+            </select></label>
+          <select id="start-scene" class="full" data-start="scene">
+            ${scenes.map(l => `<option value="${l.id}" ${l.id === s.startScene ? 'selected' : ''}>${esc(l.text)}${l.page ? `（p.${l.page}）` : ''}</option>`).join('')}
+          </select>
+          <label class="page-input" data-start="page"><input type="number" id="start-page" inputmode="numeric" min="1" max="${pages}" value="${Math.min(s.startPage, pages) || 1}"> ページ目から（全${pages}ページ）</label>
+          <select id="start-marker" class="full" data-start="marker">
+            ${markers.map(l => `<option value="${l.id}" ${l.id === s.startMarker ? 'selected' : ''}>🔖 ${esc(shortText(l))}</option>`).join('')}
+          </select>
+
+          <label class="field">終わる場所
+            <select id="end-kind" class="full">
+              <option value="end">最後まで</option>
+              ${available.scene ? '<option value="scene">その場面の終わりまで</option>' : ''}
+              ${available.marker ? '<option value="marker">次の 🔖 マーカーの手前まで</option>' : ''}
+              ${available.page ? '<option value="page">ページを指定</option>' : ''}
+            </select></label>
+          <label class="page-input" data-end="page"><input type="number" id="end-page" inputmode="numeric" min="1" max="${pages}" value="${Math.min(s.endPage, pages) || 1}"> ページ目の終わりまで</label>
+          <p class="hint">終わる場所まで来ると止まります。▶ を押すと、同じ範囲をもう一度練習できます。</p>
+          ${markers.length ? '' : '<p class="hint">🔖 練習画面の右下のボタンで、好きな行にマーカーを付けられます。</p>'}
+          ${!pages && /\.pdf$/i.test(script.fileName || '') ? '<p class="hint">ページで指定するには、この台本をもう一度読み込んでください。</p>' : ''}
+        </div>
 
         <button type="button" class="btn primary big" id="go">▶ 練習を始める</button>
 
@@ -271,7 +388,8 @@
       const c = row.dataset.char;
       row.querySelectorAll('select').forEach(sel => sel.addEventListener('change', () => {
         const conf = s.voices[c] = s.voices[c] || {};
-        conf[sel.dataset.k] = sel.dataset.k === 'pitch' ? (sel.value ? parseFloat(sel.value) : null) : sel.value;
+        conf[sel.dataset.k] = sel.value;
+        if (sel.dataset.k === 'type') conf.pitch = null; // 以前の「高さ」設定より、タイプを優先する
         save(script);
       }));
       row.querySelector('.test').addEventListener('click', () => {
@@ -282,9 +400,36 @@
       });
     });
 
+    const startKind = $('#start-kind'), endKind = $('#end-kind');
+    startKind.value = s.startKind;
+    endKind.value = s.endKind;
+    const syncRange = () => {
+      view.querySelectorAll('[data-start]').forEach(el => { el.hidden = el.dataset.start !== startKind.value; });
+      view.querySelectorAll('[data-end]').forEach(el => { el.hidden = el.dataset.end !== endKind.value; });
+    };
+    syncRange();
+    const readRange = () => {
+      s.startKind = startKind.value;
+      s.endKind = endKind.value;
+      if (scenes.length) s.startScene = parseInt($('#start-scene').value, 10);
+      if (markers.length) s.startMarker = parseInt($('#start-marker').value, 10);
+      const clampPage = v => Math.max(1, Math.min(pages || 1, parseInt(v, 10) || 1));
+      s.startPage = clampPage($('#start-page').value);
+      s.endPage = clampPage($('#end-page').value);
+      syncRange();
+      save(script);
+    };
+    ['#start-kind', '#end-kind', '#start-scene', '#start-marker', '#start-page', '#end-page']
+      .forEach(sel => $(sel).addEventListener('change', readRange));
+
     $('#go').addEventListener('click', () => {
       Speech.unlock();
-      s.position = parseInt($('#start').value, 10) || 0;
+      readRange();
+      const { start, stop } = computeRange(script);
+      if (stop <= start) { alert('終わる場所が、始める場所より前になっています'); return; }
+      s.position = start;
+      s.rangeStart = start;
+      s.stopAt = stop < script.lines.length ? stop : null;
       save(script).then(() => { location.hash = `#/s/${script.id}/play`; });
     });
 
@@ -304,7 +449,17 @@
 
   function lineHtml(l, i, cls = '') {
     const who = l.type === 'speech' ? `<span class="who">${esc(l.speakers.join('・'))}</span>` : '';
-    return `<li class="line t-${l.type} ${cls}" data-i="${i}">${who}<span class="text">${esc(l.text)}</span></li>`;
+    return `<li class="line t-${l.type} ${l.marker ? 'marked' : ''} ${cls}" data-i="${i}">${who}<span class="text">${esc(l.text)}</span></li>`;
+  }
+
+  // 台本の全行。ページが変わる所に区切りを入れる
+  function linesHtml(script, clsOf = () => '') {
+    let page = null;
+    return script.lines.map((l, i) => {
+      const sep = l.page && l.page !== page ? `<li class="page-sep">${l.page}ページ</li>` : '';
+      page = l.page || page;
+      return sep + lineHtml(l, i, clsOf(l, i));
+    }).join('');
   }
 
   function renderEdit(script) {
@@ -315,7 +470,7 @@
         <div class="row-btns">
           <button type="button" class="btn" id="merge-name">役名をまとめる・変える</button>
         </div>
-        <ol class="lines editable">${script.lines.map((l, i) => lineHtml(l, i)).join('')}</ol>
+        <ol class="lines editable">${linesHtml(script)}</ol>
       </section>`;
 
     $('#merge-name').addEventListener('click', () => openRenameDialog(script));
@@ -368,6 +523,7 @@
         <input name="speakers" list="char-list2" value="${esc(l.speakers.join('・'))}"></label>
       <datalist id="char-list2">${script.characters.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
       <label>文章<textarea name="text" rows="5">${esc(l.text)}</textarea></label>
+      <label class="check"><input type="checkbox" name="marker" ${l.marker ? 'checked' : ''}> 🔖 マーカーを付ける（ここから練習を始められます）</label>
       <div class="dialog-btns">
         ${i > 0 ? '<button value="join" class="btn small">前の行とつなげる</button>' : ''}
         <button value="del" class="btn small danger">この行を削除</button>
@@ -392,6 +548,7 @@
       } else {
         l.type = typeSel.value;
         l.text = dlg.querySelector('[name=text]').value.trim();
+        l.marker = dlg.querySelector('[name=marker]').checked;
         l.speakers = l.type === 'speech'
           ? dlg.querySelector('[name=speakers]').value.split(/[・、,，]/).map(x => x.trim()).filter(Boolean)
           : [];
@@ -429,16 +586,22 @@
 
   function renderPlay(script) {
     const s = settingsOf(script);
-    setHeader(script.title, `#/s/${script.id}`);
+    setHeader(script.title, '#/', `#/s/${script.id}`);
+    // 練習の途中で設定を開いたら、戻ったときに続きから始められるようにする
+    $('#settings').onclick = e => {
+      e.preventDefault();
+      if (player) s.position = player.idx;
+      s.startKind = s.position > 0 ? 'resume' : 'top';
+      save(script).then(() => { location.hash = `#/s/${script.id}`; });
+    };
     document.body.classList.add('playing');
 
     view.innerHTML = `
       <section class="play">
-        <ol class="lines script">${script.lines.map((l, i) => {
+        <ol class="lines script">${linesHtml(script, l => {
           const mine = isMine(script, l);
-          const cls = [mine ? 'mine' : '', mine && !s.showMine ? 'concealed' : '', isPlayable(script, l) ? '' : 'muted'].join(' ');
-          return lineHtml(l, i, cls);
-        }).join('')}</ol>
+          return [mine ? 'mine' : '', mine && !s.showMine ? 'concealed' : '', isPlayable(script, l) ? '' : 'muted'].join(' ');
+        })}</ol>
       </section>
       <div class="turn" id="turn" hidden>
         <div class="turn-head">あなたの番<span id="turn-who"></span></div>
@@ -451,6 +614,7 @@
         <button type="button" id="prev" aria-label="前へ">⏮</button>
         <button type="button" id="toggle" class="main" aria-label="再生">▶</button>
         <button type="button" id="next" aria-label="次へ">⏭</button>
+        <button type="button" id="marker" class="mark-btn" aria-label="マーカー">🔖</button>
       </nav>`;
 
     if (!s.myChars.length && !s.readMine) toast('あなたの役が選ばれていないので、全員のセリフを読み上げます');
@@ -459,6 +623,7 @@
     $('#toggle').addEventListener('click', () => player.playing ? player.pause() : player.play());
     $('#next').addEventListener('click', () => player.next());
     $('#prev').addEventListener('click', () => player.prev());
+    $('#marker').addEventListener('click', () => player.toggleMarker());
     $('#reveal').addEventListener('click', () => { $('#turn-text').classList.remove('concealed'); $('#reveal').hidden = true; });
     view.querySelector('.script').addEventListener('click', e => {
       const li = e.target.closest('li[data-i]');
@@ -474,6 +639,14 @@
       this.script = script;
       this.s = settingsOf(script);
       this.idx = Math.min(this.s.position || 0, script.lines.length - 1);
+      // 練習する範囲（stopAt の行の手前で止まる）
+      this.rangeStart = this.s.rangeStart || 0;
+      this.stopAt = this.s.stopAt || script.lines.length;
+      if (this.idx < this.rangeStart || this.idx >= this.stopAt) this.clearRange();
+      this.markRange();
+      if (this.stopAt < script.lines.length) {
+        toast(`${shortText(script.lines[this.rangeStart])} から練習します`);
+      }
       this.playing = false;
       this.run = 0;          // 再生のたびに増やし、古い処理を止める
       this.waitDone = null;  // 自分の番で待っているときの「次へ」
@@ -521,8 +694,33 @@
       this.jump(this.findPlayable(this.idx - 1, -1));
     }
 
+    clearRange() {
+      this.rangeStart = 0;
+      this.stopAt = this.script.lines.length;
+      this.s.rangeStart = 0;
+      this.s.stopAt = null;
+    }
+
+    // 範囲の外の行を薄く表示する
+    markRange() {
+      view.querySelectorAll('.line[data-i]').forEach(el => {
+        const i = parseInt(el.dataset.i, 10);
+        el.classList.toggle('out', i < this.rangeStart || i >= this.stopAt);
+      });
+    }
+
+    toggleMarker() {
+      const line = this.script.lines[this.idx];
+      line.marker = !line.marker;
+      const el = view.querySelector(`.line[data-i="${this.idx}"]`);
+      if (el) el.classList.toggle('marked', line.marker);
+      ScriptDB.put(this.script);
+      toast(line.marker ? '🔖 マーカーを付けました。設定画面の「始める場所」で選べます' : 'マーカーを外しました');
+    }
+
     jump(i) {
       if (i < 0 || i >= this.script.lines.length) return;
+      if (i < this.rangeStart || i >= this.stopAt) { this.clearRange(); this.markRange(); }
       const wasPlaying = this.playing;
       this.interrupt();
       this.hideTurn();
@@ -554,6 +752,14 @@
     async loop(run) {
       const lines = this.script.lines;
       while (this.playing && run === this.run) {
+        if (this.idx >= this.stopAt && this.stopAt < lines.length) {
+          // 範囲の終わり: 範囲の最初に戻しておき、▶ でもう一度練習できるようにする
+          this.pause();
+          this.idx = this.rangeStart;
+          this.highlight(this.idx);
+          toast('範囲の終わりまで来ました。▶ でもう一度練習できます');
+          return;
+        }
         if (this.idx >= lines.length) {
           this.pause();
           this.idx = 0;

@@ -13,7 +13,21 @@
   }
   if (synth) {
     loadVoices();
-    synth.addEventListener && synth.addEventListener('voiceschanged', loadVoices);
+    synth.addEventListener && synth.addEventListener('voiceschanged', () => {
+      const before = japaneseVoices.length;
+      loadVoices();
+      if (japaneseVoices.length !== before) global.dispatchEvent(new Event('voices-updated'));
+    });
+  }
+
+  // 声の名前から性別を推測する（わからなければ null）
+  const FEMALE = /kyoko|o-?ren|haruka|ayumi|nanami|mayu|sayaka|aoi|shiori|mizuki|nanako|sakura|google|女性|female/i;
+  const MALE = /otoya|hattori|ichiro|keita|daichi|naoki|takumi|kenji|男性|male/i;
+  function genderOf(voice) {
+    const n = voice.name || '';
+    if (MALE.test(n) && !/female/i.test(n)) return 'm';
+    if (FEMALE.test(n)) return 'f';
+    return null;
   }
 
   function voices() {
@@ -159,5 +173,5 @@
     });
   }
 
-  global.Speech = { voices, speak, cancel, unlock, cleanForSpeech, waitForSpeechEnd, supported: !!synth };
+  global.Speech = { voices, genderOf, speak, cancel, unlock, cleanForSpeech, waitForSpeechEnd, supported: !!synth };
 })(window);

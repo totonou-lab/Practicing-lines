@@ -1,6 +1,6 @@
 // 電波がない所でもアプリを開けるよう、アプリのファイルを端末に保存しておく。
 // 通信できるときは最新のファイルを取りに行き、できないときは保存しておいたものを使う。
-const CACHE = 'line-rehearsal-v1';
+const CACHE = 'line-rehearsal-v3';
 const FILES = [
   './',
   'index.html',

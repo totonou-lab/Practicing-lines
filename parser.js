@@ -114,6 +114,7 @@
       p.rows.forEach((r, i) => {
         const prev = p.rows[i - 1];
         out.push({
+          page: pi + 1,
           indent: (r.start - margin) / size,
           segs: r.segs.map(s => ({ text: s.text, indent: (s.start - margin) / size })),
           length: (r.end - r.start) / size,
@@ -225,6 +226,7 @@
     const lines = [];
     let prevRow = null;
     rows.forEach((row, i) => {
+      const page = row.page || null; // PDFのときだけ、その行があるページ
       const text = rowText(row);
       const last = lines[lines.length - 1];
       const prev = prevRow;
@@ -235,7 +237,7 @@
       if (c && c.text && isValidName(c.name, c.textIndent, c.quoted)) {
         const parts = c.name.split(NAME_SEP).filter(Boolean);
         const speakers = (counts.get(c.name) || 0) >= 2 && parts.some(p => !counts.has(p)) ? [c.name] : parts;
-        lines.push({ type: 'speech', speakers, text: c.text });
+        lines.push({ type: 'speech', speakers, text: c.text, page });
         return;
       }
 
@@ -250,7 +252,7 @@
       }
 
       if (isSceneHeading(text)) {
-        lines.push({ type: 'scene', speakers: [], text });
+        lines.push({ type: 'scene', speakers: [], text, page });
         return;
       }
 
@@ -260,7 +262,7 @@
         last.text += text;
         return;
       }
-      lines.push({ type: 'direction', speakers: [], text });
+      lines.push({ type: 'direction', speakers: [], text, page });
     });
 
     lines.forEach((l, i) => { l.id = i + 1; });
