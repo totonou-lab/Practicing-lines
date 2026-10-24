@@ -253,6 +253,11 @@
     return script.lines.reduce((m, l) => Math.max(m, l.page || 0), 0);
   }
 
+  // マーカーの表示名。名前を付けていなければセリフの場所を使う
+  function markerLabel(l) {
+    return l.markerName || shortText(l);
+  }
+
   function shortText(l) {
     const t = l.text.length > 18 ? l.text.slice(0, 18) + '…' : l.text;
     return (l.page ? `p.${l.page} ` : '') + (l.speakers.length ? l.speakers.join('・') + '：' : '') + t;
@@ -373,7 +378,7 @@
           </select>
           <label class="page-input" data-start="page"><input type="number" id="start-page" inputmode="numeric" min="1" max="${pages}" value="${Math.min(s.startPage, pages) || 1}"> ページ目から（全${pages}ページ）</label>
           <select id="start-marker" class="full" data-start="marker">
-            ${markers.map(l => `<option value="${l.id}" ${l.id === s.startMarker ? 'selected' : ''}>🔖 ${esc(shortText(l))}</option>`).join('')}
+            ${markers.map(l => `<option value="${l.id}" ${l.id === s.startMarker ? 'selected' : ''}>🔖 ${esc(markerLabel(l))}</option>`).join('')}
           </select>
 
           <label class="field">終わる場所
@@ -388,6 +393,22 @@
           ${markers.length ? '' : '<p class="hint">🔖 練習画面の右下のボタンで、好きな行にマーカーを付けられます。</p>'}
           ${!pages && /\.pdf$/i.test(script.fileName || '') ? '<p class="hint">ページで指定するには、この台本をもう一度読み込んでください。</p>' : ''}
         </div>
+
+        ${markers.length ? `
+        <details class="markers" id="markers">
+          <summary>🔖 マーカーの一覧（${markers.length}）</summary>
+          <ul>${markers.map(l => `
+            <li data-id="${l.id}">
+              <div class="mk-text">
+                <span class="mk-name">${esc(markerLabel(l))}</span>
+                ${l.markerName ? `<span class="mk-where">${esc(shortText(l))}</span>` : ''}
+              </div>
+              <button type="button" class="btn small mk-rename">名前</button>
+              <button type="button" class="btn small danger mk-delete">削除</button>
+            </li>`).join('')}
+          </ul>
+          <button type="button" class="btn small danger" id="mk-clear">すべて削除</button>
+        </details>` : ''}
 
         <button type="button" class="btn primary big" id="go">▶ 練習を始める</button>
 
@@ -404,7 +425,53 @@
     };
     updateVisibility();
 
-    const rerender = () => renderSetup(script, fromPlay);
+    const rerender = () => {
+      const y = window.scrollY;
+      const markersOpen = $('#markers') && $('#markers').open;
+      renderSetup(script, fromPlay);
+      if (markersOpen && $('#markers')) $('#markers').open = true;
+      window.scrollTo(0, y);
+    };
+
+    // マーカーの一覧
+    const lineById = id => script.lines.find(l => l.id === id);
+    view.querySelectorAll('.markers li[data-id]').forEach(li => {
+      const line = lineById(parseInt(li.dataset.id, 10));
+      li.querySelector('.mk-rename').addEventListener('click', async () => {
+        const name = prompt('マーカーの名前（空にすると、セリフの場所を表示します）', line.markerName || '');
+        if (name === null) return;
+        line.markerName = name.trim() || undefined;
+        await save(script);
+        rerender();
+      });
+      li.querySelector('.mk-delete').addEventListener('click', async () => {
+        const before = { marker: line.marker, markerName: line.markerName };
+        line.marker = false;
+        delete line.markerName;
+        await save(script);
+        rerender();
+        toast('マーカーを削除しました', {
+          label: '元に戻す',
+          run: async () => { Object.assign(line, before); await save(script); rerender(); },
+        });
+      });
+    });
+    const clear = $('#mk-clear');
+    if (clear) clear.addEventListener('click', async () => {
+      if (!confirm(`マーカーを${markers.length}個すべて削除しますか？`)) return;
+      const before = markers.map(l => [l, l.markerName]);
+      for (const l of markers) { l.marker = false; delete l.markerName; }
+      await save(script);
+      rerender();
+      toast('マーカーをすべて削除しました', {
+        label: '元に戻す',
+        run: async () => {
+          for (const [l, name] of before) { l.marker = true; if (name) l.markerName = name; }
+          await save(script);
+          rerender();
+        },
+      });
+    });
     const merge = $('#merge-name');
     if (merge) merge.addEventListener('click', () => openRenameDialog(script, rerender));
     const undo = $('#undo-rename');
@@ -544,14 +611,38 @@
       <h3>役名をまとめる・変える</h3>
       <label>変える前の役名
         <select name="from">${script.characters.map(c => `<option>${esc(c)}</option>`).join('')}</select></label>
-      <label>新しい役名（既にある役名にするとまとめられます）
-        <input name="to" list="char-list" required></label>
-      <datalist id="char-list">${script.characters.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+      <label>新しい役名（一覧の役を選ぶと、その役にまとめられます）
+        <select name="to-pick"></select></label>
+      <label class="new-name" hidden>新しい役名を入力
+        <input name="to-new"></label>
       <div class="dialog-btns"><button value="cancel" class="btn" formnovalidate>やめる</button><button value="ok" class="btn primary">変更する</button></div>`);
+    const fromSel = dlg.querySelector('[name=from]');
+    const pick = dlg.querySelector('[name=to-pick]');
+    const newField = dlg.querySelector('.new-name');
+    const newInput = dlg.querySelector('[name=to-new]');
+    // 「変える前」に選んだ役以外を、新しい役名の候補にする
+    const fillPick = () => {
+      const keep = pick.value;
+      pick.innerHTML = script.characters.filter(c => c !== fromSel.value)
+        .map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('') +
+        '<option value="__new">✏️ 新しい名前を入力する</option>';
+      if ([...pick.options].some(o => o.value === keep)) pick.value = keep;
+      syncNew();
+    };
+    const syncNew = () => {
+      const isNew = pick.value === '__new';
+      newField.hidden = !isNew;
+      newInput.required = isNew;
+      if (isNew) newInput.focus();
+    };
+    fromSel.addEventListener('change', fillPick);
+    pick.addEventListener('change', syncNew);
+    fillPick();
+
     dlg.onclose = async () => {
       if (dlg.returnValue !== 'ok') return;
-      const from = dlg.querySelector('[name=from]').value;
-      const to = dlg.querySelector('[name=to]').value.trim();
+      const from = fromSel.value;
+      const to = (pick.value === '__new' ? newInput.value : pick.value).trim();
       if (!to || from === to) return;
       const s = settingsOf(script);
       // 元に戻せるよう、変更前の状態を残しておく（最大10回分）
@@ -637,6 +728,7 @@
         l.type = typeSel.value;
         l.text = dlg.querySelector('[name=text]').value.trim();
         l.marker = dlg.querySelector('[name=marker]').checked;
+        if (!l.marker) delete l.markerName;
         l.speakers = l.type === 'speech'
           ? dlg.querySelector('[name=speakers]').value.split(/[・、,，]/).map(x => x.trim()).filter(Boolean)
           : [];
@@ -804,10 +896,11 @@
     toggleMarker() {
       const line = this.script.lines[this.idx];
       line.marker = !line.marker;
+      if (!line.marker) delete line.markerName;
       const el = view.querySelector(`.line[data-i="${this.idx}"]`);
       if (el) el.classList.toggle('marked', line.marker);
       ScriptDB.put(this.script);
-      toast(line.marker ? '🔖 マーカーを付けました。設定画面の「始める場所」で選べます' : 'マーカーを外しました');
+      toast(line.marker ? '🔖 マーカーを付けました。設定画面の「マーカーの一覧」で名前を付けたり削除したりできます' : 'マーカーを外しました');
     }
 
     // 隠すモードのとき、i 行目より前の自分のセリフは表示し、i 行目から後ろは隠す

@@ -140,6 +140,15 @@ select.full { width: 100%; min-height: 44px; padding: 8px; border: 1px solid var
 .voice-row select { min-width: 0; min-height: 36px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 4px; }
 .voice-row .test { grid-row: 2 / 4; grid-column: 2; align-self: center; }
 
+.markers { margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 12px 12px; }
+.markers summary { cursor: pointer; padding: 10px 0 6px; font-weight: 600; font-size: 15px; }
+.markers ul { list-style: none; padding: 0; margin: 0 0 10px; }
+.markers li { display: flex; align-items: center; gap: 6px; padding: 8px 0; border-top: 1px solid var(--line); }
+.markers .mk-text { flex: 1; min-width: 0; }
+.markers .mk-name { display: block; font-size: 14px; overflow-wrap: anywhere; }
+.markers .mk-where { display: block; font-size: 12px; color: var(--muted); }
+.markers .btn.small { flex: none; padding: 4px 10px; }
+
 .links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
 .links .btn { flex: 1 1 auto; }
 .row-btns { margin: 8px 0 16px; }
