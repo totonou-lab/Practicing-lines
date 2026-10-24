@@ -1,0 +1,15 @@
+{
+  "name": "セリフ稽古",
+  "short_name": "セリフ稽古",
+  "description": "台本を読み込むと、相手のセリフを読み上げてくれるセリフ練習アプリ",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#1f1b2e",
+  "theme_color": "#1f1b2e",
+  "lang": "ja",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
