@@ -868,7 +868,21 @@
 
   // 電波がない所でも開けるようにする
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+      .then(reg => {
+        // 画面に戻ってきたときにも新しい版がないか確認する
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') reg.update().catch(() => {});
+        });
+      })
+      .catch(() => {});
+    // 新しい版が届いたら読み込み直す（練習中はお知らせだけ）
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController) return;
+      if (player && player.playing) toast('新しい版があります。練習が終わったら開き直してください');
+      else location.reload();
+    });
   }
 
   if (!Speech.supported) toast('このブラウザは読み上げに対応していません');

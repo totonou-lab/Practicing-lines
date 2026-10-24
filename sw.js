@@ -1,6 +1,6 @@
 // 電波がない所でもアプリを開けるよう、アプリのファイルを端末に保存しておく。
 // 通信できるときは最新のファイルを取りに行き、できないときは保存しておいたものを使う。
-const CACHE = 'line-rehearsal-v3';
+const CACHE = 'line-rehearsal-v4';
 const FILES = [
   './',
   'index.html',
@@ -19,7 +19,11 @@ const FILES = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {
@@ -33,10 +37,12 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
+  // 自分のサイトのファイルは、ブラウザの一時保存を使わず毎回新しい版か確認する
+  const sameOrigin = new URL(req.url).origin === location.origin;
   e.respondWith(
-    fetch(req)
+    (sameOrigin ? fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(req))
       .then(res => {
-        if (res.ok && new URL(req.url).origin === location.origin) {
+        if (res.ok && sameOrigin) {
           const copy = res.clone();
           caches.open(CACHE).then(c => c.put(req, copy));
         }
