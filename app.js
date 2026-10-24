@@ -55,12 +55,21 @@
     return s;
   }
 
-  function toast(msg) {
+  // action を渡すと、お知らせの中にボタン（例: 元に戻す）を出す
+  function toast(msg, action) {
     const t = $('#toast');
     t.textContent = msg;
+    t.classList.toggle('has-action', !!action);
+    if (action) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = action.label;
+      b.onclick = () => { t.classList.remove('show'); action.run(); };
+      t.appendChild(b);
+    }
     t.classList.add('show');
     clearTimeout(toast.timer);
-    toast.timer = setTimeout(() => t.classList.remove('show'), 3000);
+    toast.timer = setTimeout(() => t.classList.remove('show'), action ? 7000 : 3000);
   }
 
   function setHeader(title, backHash, settingsHash, backLabel) {
@@ -294,7 +303,10 @@
         <div class="chips">
           ${script.characters.map(c => `<button type="button" class="chip ${s.myChars.includes(c) ? 'on' : ''}" data-char="${esc(c)}">${esc(c)}<small>${counts[c] || 0}</small></button>`).join('') || '<p class="hint">役が見つかりません。下の「台本の確認・修正」で直してください。</p>'}
         </div>
-        ${script.characters.length ? '<button type="button" class="btn small merge-btn" id="merge-name">役名をまとめる・変える</button>' : ''}
+        <div class="merge-row">
+          ${script.characters.length ? '<button type="button" class="btn small" id="merge-name">役名をまとめる・変える</button>' : ''}
+          ${undoButtonHtml(script)}
+        </div>
 
         <h2>ト書き</h2>
         ${segmented('readDirections', [[true, '読む'], [false, '飛ばす']], s.readDirections)}
@@ -392,8 +404,11 @@
     };
     updateVisibility();
 
+    const rerender = () => renderSetup(script, fromPlay);
     const merge = $('#merge-name');
-    if (merge) merge.addEventListener('click', () => openRenameDialog(script, () => renderSetup(script, fromPlay)));
+    if (merge) merge.addEventListener('click', () => openRenameDialog(script, rerender));
+    const undo = $('#undo-rename');
+    if (undo) undo.addEventListener('click', () => undoRename(script, rerender));
 
     view.querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => {
       const c = b.dataset.char;
@@ -503,11 +518,14 @@
         <p class="hint">行をタップすると、種類（セリフ／ト書き）や役名、文章を直せます。読み方がおかしい言葉は、ひらがなに書き換えると正しく読まれます。</p>
         <div class="row-btns">
           <button type="button" class="btn" id="merge-name">役名をまとめる・変える</button>
+          ${undoButtonHtml(script)}
         </div>
         <ol class="lines editable">${linesHtml(script)}</ol>
       </section>`;
 
     $('#merge-name').addEventListener('click', () => openRenameDialog(script, () => renderEdit(script)));
+    const undo = $('#undo-rename');
+    if (undo) undo.addEventListener('click', () => undoRename(script, () => renderEdit(script)));
     view.querySelector('.lines').addEventListener('click', e => {
       const li = e.target.closest('li[data-i]');
       if (li) openLineDialog(script, parseInt(li.dataset.i, 10));
@@ -529,24 +547,58 @@
       <label>新しい役名（既にある役名にするとまとめられます）
         <input name="to" list="char-list" required></label>
       <datalist id="char-list">${script.characters.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
-      <div class="dialog-btns"><button value="cancel" class="btn">やめる</button><button value="ok" class="btn primary">変更する</button></div>`);
+      <div class="dialog-btns"><button value="cancel" class="btn" formnovalidate>やめる</button><button value="ok" class="btn primary">変更する</button></div>`);
     dlg.onclose = async () => {
       if (dlg.returnValue !== 'ok') return;
       const from = dlg.querySelector('[name=from]').value;
       const to = dlg.querySelector('[name=to]').value.trim();
       if (!to || from === to) return;
-      for (const l of script.lines) {
-        l.speakers = [...new Set(l.speakers.map(s => s === from ? to : s))];
-      }
       const s = settingsOf(script);
+      // 元に戻せるよう、変更前の状態を残しておく（最大10回分）
+      const history = script.renameHistory = script.renameHistory || [];
+      history.push({
+        from, to,
+        speakers: Object.fromEntries(script.lines.filter(l => l.speakers.length).map(l => [l.id, l.speakers.slice()])),
+        myChars: s.myChars.slice(),
+        voices: JSON.parse(JSON.stringify(s.voices)),
+      });
+      if (history.length > 10) history.shift();
+
+      for (const l of script.lines) {
+        l.speakers = [...new Set(l.speakers.map(c => c === from ? to : c))];
+      }
       if (s.myChars.includes(from)) s.myChars = [...new Set(s.myChars.map(c => c === from ? to : c))];
+      if (s.voices[from] && !s.voices[to]) s.voices[to] = s.voices[from];
+      delete s.voices[from];
       refreshCharacters(script);
       await save(script);
-      toast(`「${from}」を「${to}」に変えました`);
       const y = window.scrollY;
       onDone();
       window.scrollTo(0, y);
+      toast(`「${from}」を「${to}」に変えました`, { label: '元に戻す', run: () => undoRename(script, onDone) });
     };
+  }
+
+  async function undoRename(script, onDone) {
+    const last = (script.renameHistory || []).pop();
+    if (!last) return;
+    for (const l of script.lines) {
+      if (last.speakers[l.id]) l.speakers = last.speakers[l.id];
+    }
+    const s = settingsOf(script);
+    s.myChars = last.myChars;
+    s.voices = last.voices;
+    refreshCharacters(script);
+    await save(script);
+    const y = window.scrollY;
+    onDone();
+    window.scrollTo(0, y);
+    toast(`「${last.to}」への変更を取り消しました`);
+  }
+
+  function undoButtonHtml(script) {
+    const last = (script.renameHistory || []).slice(-1)[0];
+    return last ? `<button type="button" class="btn small" id="undo-rename">↩ 元に戻す（${esc(last.from)}→${esc(last.to)}）</button>` : '';
   }
 
   function openLineDialog(script, i) {
@@ -564,7 +616,7 @@
         ${i > 0 ? '<button value="join" class="btn small">前の行とつなげる</button>' : ''}
         <button value="del" class="btn small danger">この行を削除</button>
       </div>
-      <div class="dialog-btns"><button value="cancel" class="btn">やめる</button><button value="ok" class="btn primary">保存</button></div>`);
+      <div class="dialog-btns"><button value="cancel" class="btn" formnovalidate>やめる</button><button value="ok" class="btn primary">保存</button></div>`);
     const typeSel = dlg.querySelector('[name=type]');
     const spField = dlg.querySelector('.speaker-field');
     const sync = () => { spField.hidden = typeSel.value !== 'speech'; };
@@ -634,9 +686,11 @@
 
     view.innerHTML = `
       <section class="play">
-        <ol class="lines script">${linesHtml(script, l => {
+        <ol class="lines script">${linesHtml(script, (l, i) => {
           const mine = isMine(script, l);
-          return [mine ? 'mine' : '', mine && !s.showMine ? 'concealed' : '', isPlayable(script, l) ? '' : 'muted'].join(' ');
+          // 隠すのは、これから言うセリフ（今の位置から後ろ）だけ
+          const conceal = mine && !s.showMine && i >= (s.position || 0);
+          return [mine ? 'mine' : '', conceal ? 'concealed' : '', isPlayable(script, l) ? '' : 'muted'].join(' ');
         })}</ol>
       </section>
       <div class="turn" id="turn" hidden>
@@ -756,11 +810,11 @@
       toast(line.marker ? '🔖 マーカーを付けました。設定画面の「始める場所」で選べます' : 'マーカーを外しました');
     }
 
-    // 隠すモードのとき、i 行目から後の自分のセリフを隠し直す
+    // 隠すモードのとき、i 行目より前の自分のセリフは表示し、i 行目から後ろは隠す
     concealFrom(i) {
       if (this.s.showMine) return;
       view.querySelectorAll('.line.mine').forEach(el => {
-        if (parseInt(el.dataset.i, 10) >= i) el.classList.add('concealed');
+        el.classList.toggle('concealed', parseInt(el.dataset.i, 10) >= i);
       });
     }
 
