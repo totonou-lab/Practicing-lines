@@ -107,7 +107,16 @@
   let player = null;
 
   async function route() {
-    if (player) { player.stop(); player = null; }
+    if (player) {
+      // 練習画面を離れるときは、次に「続きから」始められるようにしておく
+      const p = player;
+      player = null;
+      p.stop();
+      p.s.position = p.idx;
+      p.s.startKind = p.idx > 0 ? 'resume' : 'top';
+      clearTimeout(saveTimer);
+      await ScriptDB.put(p.script);
+    }
     releaseWakeLock();
     document.body.classList.remove('playing');
     window.scrollTo(0, 0);
@@ -916,14 +925,7 @@
 
   function renderPlay(script) {
     const s = settingsOf(script);
-    setHeader(script.title, '#/', `#/s/${script.id}`);
-    // 練習の途中で設定を開いたら、戻ったときに続きから始められるようにする
-    $('#settings').onclick = e => {
-      e.preventDefault();
-      if (player) s.position = player.idx;
-      s.startKind = s.position > 0 ? 'resume' : 'top';
-      save(script).then(() => { location.hash = `#/s/${script.id}/settings`; });
-    };
+    setHeader(script.title, '#/', `#/s/${script.id}/settings`);
     document.body.classList.add('playing');
 
     view.innerHTML = `
