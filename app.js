@@ -63,9 +63,11 @@
     toast.timer = setTimeout(() => t.classList.remove('show'), 3000);
   }
 
-  function setHeader(title, backHash, settingsHash) {
+  function setHeader(title, backHash, settingsHash, backLabel) {
     titleEl.textContent = title;
     backBtn.hidden = !backHash;
+    backBtn.textContent = backLabel ? `‹ ${backLabel}` : '‹';
+    backBtn.classList.toggle('with-label', !!backLabel);
     backBtn.onclick = () => { location.hash = backHash; };
     const gear = $('#settings');
     gear.hidden = !settingsHash;
@@ -107,7 +109,7 @@
         settingsOf(script);
         if (parts[2] === 'edit') return renderEdit(script);
         if (parts[2] === 'play') return renderPlay(script);
-        return renderSetup(script);
+        return renderSetup(script, parts[2] === 'settings'); // settings = 練習の途中で開いた設定
       }
       return renderHome();
     } catch (e) {
@@ -118,7 +120,7 @@
   window.addEventListener('hashchange', route);
   // 声の一覧が後から届いたら、設定画面を描き直す
   window.addEventListener('voices-updated', () => {
-    if (/^#\/s\/[^/]+$/.test(location.hash) && !$('#dialog').open) route();
+    if (/^#\/s\/[^/]+(\/settings)?$/.test(location.hash) && !$('#dialog').open) route();
   });
 
   // ---------- ホーム（台本の一覧） ----------
@@ -143,8 +145,35 @@
             </a></li>`;
           }).join('') || '<li class="empty">まだ台本がありません</li>'}
         </ul>
+        ${howToOpenHtml(!scripts.length)}
       </section>`;
     $('#file').addEventListener('change', e => importFile(e.target.files[0]));
+  }
+
+  // ホーム画面に追加して開いているか
+  function isInstalled() {
+    return (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  }
+
+  function howToOpenHtml(open) {
+    const now = isInstalled() ? 'いまは「アプリとして」開いています。' : 'いまは「ブラウザで」開いています。';
+    return `
+      <details class="howto" ${open ? 'open' : ''}>
+        <summary>📱 このアプリの開き方（2種類）</summary>
+        <p class="now">${now}</p>
+        <div class="way">
+          <h3>① ブラウザで使う（ブックマーク）</h3>
+          <p>Safari や Chrome でこのページを開き、ブックマーク（お気に入り）に追加します。<br>
+          手軽ですが、画面の上下にブラウザのバーが表示されます。</p>
+        </div>
+        <div class="way">
+          <h3>② アプリとして使う（ホーム画面に追加）おすすめ</h3>
+          <p><b>iPhone：</b>Safari で開き、画面下の共有ボタン（□に↑）→「ホーム画面に追加」<br>
+          <b>Android：</b>Chrome で開き、右上の︙ →「ホーム画面に追加」<br>
+          ホーム画面のアイコンからすぐ開け、画面を広く使えます。電波がない所でも開けます。</p>
+        </div>
+        <p class="warn">⚠ ①と②では、保存される台本が別々になります（iPhone の仕組みです）。どちらかに決めて使い、台本はそちらで読み込んでください。</p>
+      </details>`;
   }
 
   async function importFile(file) {
@@ -240,9 +269,10 @@
     return { start, stop };
   }
 
-  function renderSetup(script) {
+  function renderSetup(script, fromPlay) {
     const s = settingsOf(script);
-    setHeader(script.title, '#/');
+    if (fromPlay) setHeader('設定', `#/s/${script.id}/play`, null, '練習に戻る');
+    else setHeader(script.title, '#/');
     const counts = {};
     for (const l of script.lines) if (l.type === 'speech') for (const c of l.speakers) counts[c] = (counts[c] || 0) + 1;
     const voices = Speech.voices();
@@ -264,6 +294,7 @@
         <div class="chips">
           ${script.characters.map(c => `<button type="button" class="chip ${s.myChars.includes(c) ? 'on' : ''}" data-char="${esc(c)}">${esc(c)}<small>${counts[c] || 0}</small></button>`).join('') || '<p class="hint">役が見つかりません。下の「台本の確認・修正」で直してください。</p>'}
         </div>
+        ${script.characters.length ? '<button type="button" class="btn small merge-btn" id="merge-name">役名をまとめる・変える</button>' : ''}
 
         <h2>ト書き</h2>
         ${segmented('readDirections', [[true, '読む'], [false, '飛ばす']], s.readDirections)}
@@ -360,6 +391,9 @@
       view.querySelectorAll('[data-for]').forEach(el => { el.hidden = el.dataset.for !== s.advance; });
     };
     updateVisibility();
+
+    const merge = $('#merge-name');
+    if (merge) merge.addEventListener('click', () => openRenameDialog(script, () => renderSetup(script, fromPlay)));
 
     view.querySelectorAll('.chip').forEach(b => b.addEventListener('click', () => {
       const c = b.dataset.char;
@@ -473,7 +507,7 @@
         <ol class="lines editable">${linesHtml(script)}</ol>
       </section>`;
 
-    $('#merge-name').addEventListener('click', () => openRenameDialog(script));
+    $('#merge-name').addEventListener('click', () => openRenameDialog(script, () => renderEdit(script)));
     view.querySelector('.lines').addEventListener('click', e => {
       const li = e.target.closest('li[data-i]');
       if (li) openLineDialog(script, parseInt(li.dataset.i, 10));
@@ -487,7 +521,7 @@
     return dlg;
   }
 
-  function openRenameDialog(script) {
+  function openRenameDialog(script, onDone) {
     const dlg = openDialog(`
       <h3>役名をまとめる・変える</h3>
       <label>変える前の役名
@@ -509,7 +543,9 @@
       refreshCharacters(script);
       await save(script);
       toast(`「${from}」を「${to}」に変えました`);
-      renderEdit(script);
+      const y = window.scrollY;
+      onDone();
+      window.scrollTo(0, y);
     };
   }
 
@@ -592,7 +628,7 @@
       e.preventDefault();
       if (player) s.position = player.idx;
       s.startKind = s.position > 0 ? 'resume' : 'top';
-      save(script).then(() => { location.hash = `#/s/${script.id}`; });
+      save(script).then(() => { location.hash = `#/s/${script.id}/settings`; });
     };
     document.body.classList.add('playing');
 
@@ -609,12 +645,13 @@
         <button type="button" class="btn small" id="reveal" hidden>セリフを見る</button>
         <div class="meter"><div id="meter-bar"></div></div>
         <div class="turn-status" id="turn-status"></div>
+        <button type="button" class="btn primary turn-next" id="turn-next">✓ 言えた！次へ</button>
       </div>
       <nav class="controls">
-        <button type="button" id="prev" aria-label="前へ">⏮</button>
-        <button type="button" id="toggle" class="main" aria-label="再生">▶</button>
-        <button type="button" id="next" aria-label="次へ">⏭</button>
-        <button type="button" id="marker" class="mark-btn" aria-label="マーカー">🔖</button>
+        <button type="button" id="prev"><span class="ic">⏮</span><span class="lb">前へ</span></button>
+        <button type="button" id="toggle" class="main"><span class="ic">▶</span><span class="lb">再生</span></button>
+        <button type="button" id="next"><span class="ic">⏭</span><span class="lb">次へ</span></button>
+        <button type="button" id="marker"><span class="ic">🔖</span><span class="lb">印</span></button>
       </nav>`;
 
     if (!s.myChars.length && !s.readMine) toast('あなたの役が選ばれていないので、全員のセリフを読み上げます');
@@ -622,6 +659,7 @@
     player = new Player(script);
     $('#toggle').addEventListener('click', () => player.playing ? player.pause() : player.play());
     $('#next').addEventListener('click', () => player.next());
+    $('#turn-next').addEventListener('click', () => player.next());
     $('#prev').addEventListener('click', () => player.prev());
     $('#marker').addEventListener('click', () => player.toggleMarker());
     $('#reveal').addEventListener('click', () => { $('#turn-text').classList.remove('concealed'); $('#reveal').hidden = true; });
@@ -657,14 +695,14 @@
       Speech.unlock();
       requestWakeLock();
       this.playing = true;
-      $('#toggle').textContent = '⏸';
+      $('#toggle').innerHTML = '<span class="ic">⏸</span><span class="lb">停止</span>';
       this.loop(++this.run);
     }
 
     pause() {
       this.playing = false;
       this.interrupt();
-      $('#toggle').textContent = '▶';
+      $('#toggle').innerHTML = '<span class="ic">▶</span><span class="lb">再生</span>';
       this.hideTurn();
     }
 
@@ -718,9 +756,18 @@
       toast(line.marker ? '🔖 マーカーを付けました。設定画面の「始める場所」で選べます' : 'マーカーを外しました');
     }
 
+    // 隠すモードのとき、i 行目から後の自分のセリフを隠し直す
+    concealFrom(i) {
+      if (this.s.showMine) return;
+      view.querySelectorAll('.line.mine').forEach(el => {
+        if (parseInt(el.dataset.i, 10) >= i) el.classList.add('concealed');
+      });
+    }
+
     jump(i) {
       if (i < 0 || i >= this.script.lines.length) return;
       if (i < this.rangeStart || i >= this.stopAt) { this.clearRange(); this.markRange(); }
+      this.concealFrom(i);
       const wasPlaying = this.playing;
       this.interrupt();
       this.hideTurn();
@@ -756,6 +803,7 @@
           // 範囲の終わり: 範囲の最初に戻しておき、▶ でもう一度練習できるようにする
           this.pause();
           this.idx = this.rangeStart;
+          this.concealFrom(this.idx);
           this.highlight(this.idx);
           toast('範囲の終わりまで来ました。▶ でもう一度練習できます');
           return;
@@ -805,12 +853,13 @@
       const chars = Speech.cleanForSpeech(text).length;
       const estimate = Math.max(1.5, chars * 0.17 / s.rate) * s.timeFactor + 0.8;
 
+      $('#turn-next').textContent = s.advance === 'button' ? '✓ 言えた！次へ' : '次へ進む';
       if (s.advance === 'button') {
-        status.textContent = '言い終わったら ⏭ を押してください';
+        status.textContent = 'セリフを言い終わったら、下のボタンを押してください';
         bar.parentElement.hidden = true;
       } else if (s.advance === 'time') {
         bar.parentElement.hidden = false;
-        status.textContent = `${estimate.toFixed(1)}秒後に進みます（⏭ ですぐ進む）`;
+        status.textContent = `${estimate.toFixed(1)}秒後に自動で進みます`;
         bar.style.transition = 'none';
         bar.style.width = '0%';
         requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -836,13 +885,18 @@
           this.next();
         }).catch(err => {
           console.error(err);
-          status.textContent = 'マイクが使えません。⏭ を押して進んでください';
+          status.textContent = 'マイクが使えません。下のボタンを押して進んでください';
           bar.parentElement.hidden = true;
           toast('マイクの使用が許可されていません。端末の設定を確認してください');
         });
       }
       await done;
-      if (run === this.run) this.hideTurn();
+      if (run === this.run) {
+        this.hideTurn();
+        // 言い終わったセリフは表示して、合っていたか確かめられるようにする
+        const el = view.querySelector(`.line[data-i="${this.idx}"]`);
+        if (el) el.classList.remove('concealed');
+      }
     }
 
     showTurn(line) {
