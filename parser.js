@@ -89,7 +89,8 @@
   }
 
   async function rowsFromPdf(arrayBuffer) {
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, cMapUrl: CMAP_URL, cMapPacked: true }).promise;
+    // isEvalSupported: false … 細工されたPDFに仕込まれた命令が動かないようにする（CVE-2024-4367 対策）
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, cMapUrl: CMAP_URL, cMapPacked: true, isEvalSupported: false }).promise;
     const pages = [];
     for (let n = 1; n <= pdf.numPages; n++) {
       const page = await pdf.getPage(n);
