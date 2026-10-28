@@ -1,6 +1,6 @@
 // 電波がない所でもアプリを開けるよう、アプリのファイルを端末に保存しておく。
 // 通信できるときは最新のファイルを取りに行き、できないときは保存しておいたものを使う。
-const CACHE = 'line-rehearsal-v14';
+const CACHE = 'line-rehearsal-v15';
 const FILES = [
   './',
   'index.html',
@@ -9,6 +9,8 @@ const FILES = [
   'parser.js',
   'db.js',
   'speech.js',
+  'reading.js',
+  'lib/kuromoji.js',
   'manifest.json',
   'icons/icon-180.png',
   'icons/icon-192.png',

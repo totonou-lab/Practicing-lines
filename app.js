@@ -14,6 +14,7 @@
     advance: 'mic',       // 自分のセリフの後: mic=声で判断 / time=時間で判断 / button=ボタン
     showMine: true,       // 自分のセリフを画面に表示する
     rate: 1.0,
+    dictReading: true,    // 辞書で漢字の読み方を補正する
     silenceSec: 1.5,      // 言い終わったと判断するまでの無音の長さ
     timeFactor: 1.0,      // 時間で判断するときの待ち時間の倍率
     voices: {},           // 役ごとの声 { 役名: { uri, pitch } }
@@ -186,7 +187,8 @@
         <ul>
           <li><b>練習する範囲</b>…場面・ページ・マーカーから始めて、決めた所で止まります。▶ で同じ範囲をくり返せます</li>
           <li><b>🔖 マーカーの一覧</b>…名前を付ける・削除・「▶ ここから練習」</li>
-          <li><b>📖 読み方の登録</b>…読み間違える言葉を、台本全体でまとめて直せます</li>
+          <li><b>漢字の読み方</b>…「辞書で補正する」にすると、辞書で読み仮名を付けて読み間違いを減らします（初回だけ約17MBを読み込みます）</li>
+          <li><b>📖 読み方の登録</b>…それでも読み間違える言葉を、台本全体でまとめて直せます</li>
           <li><b>声の設定</b>…役ごとに「おじいさん」「若い女性」などの声のタイプを選べます</li>
           <li><b>台本の確認・修正</b>…セリフとト書きの見分け間違いや、役名を直せます</li>
         </ul>
@@ -330,6 +332,26 @@
     return text;
   }
 
+  // 実際に読み上げる文: 登録した読み方 → 辞書の読み仮名 の順に置き換える
+  function spokenText(script, text) {
+    const t = readAs(script, text);
+    return settingsOf(script).dictReading ? Reading.convert(t) : t;
+  }
+
+  // 辞書を準備する（初回は約17MBを読み込む）
+  function prepareDictionary(script) {
+    if (!settingsOf(script).dictReading || Reading.isReady()) return;
+    const status = $('#dict-status');
+    if (status) status.textContent = '辞書を準備しています…（初回だけ約17MBを読み込みます）';
+    Reading.load()
+      .then(() => { const st = $('#dict-status'); if (st) st.textContent = '辞書の準備ができています'; })
+      .catch(err => {
+        console.error(err);
+        const st = $('#dict-status');
+        if (st) st.textContent = '辞書を読み込めませんでした。電波のある所で開き直してください';
+      });
+  }
+
   // 台本の中にその言葉が何か所あるか
   function countIn(script, word) {
     let n = 0;
@@ -417,6 +439,11 @@
           <h3>あなたのセリフの表示</h3>
           ${segmented('showMine', [[true, '表示する'], [false, '隠す（暗記用）']], s.showMine)}
         </div>
+
+        <h2>漢字の読み方</h2>
+        ${segmented('dictReading', [[true, '辞書で補正する'], [false, 'iPhoneにまかせる']], s.dictReading)}
+        <p class="hint">「辞書で補正する」にすると、日本語の辞書で漢字に読み仮名を付けてから読み上げます。人名や熟語の読み間違いが減ります。どちらが自然か、試聴で聞き比べてみてください。</p>
+        <p class="hint" id="dict-status"></p>
 
         <h2>読み上げの速さ</h2>
         <label class="range">速さ <output>${s.rate.toFixed(1)}倍</output>
@@ -532,6 +559,8 @@
       view.querySelectorAll('[data-for]').forEach(el => { el.hidden = el.dataset.for !== s.advance; });
     };
     updateVisibility();
+    prepareDictionary(script);
+    if (s.dictReading && Reading.isReady()) $('#dict-status').textContent = '辞書の準備ができています';
 
     const rerender = () => {
       const y = window.scrollY;
@@ -605,6 +634,10 @@
       s[seg.dataset.name] = raw === 'true' ? true : raw === 'false' ? false : raw;
       seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
       updateVisibility();
+      if (seg.dataset.name === 'dictReading') {
+        if (s.dictReading) prepareDictionary(script);
+        else $('#dict-status').textContent = '';
+      }
       save(script);
     }));
 
@@ -626,7 +659,7 @@
         Speech.cancel();
         const sample = c === '__direction' ? 'ト書きはこの声で読みます。' :
           (script.lines.find(l => l.type === 'speech' && l.speakers.includes(c)) || { text: 'よろしくお願いします。' }).text;
-        Speech.speak(readAs(script, sample), voiceFor(script, c));
+        Speech.speak(spokenText(script, sample), voiceFor(script, c));
       });
     });
 
@@ -927,6 +960,7 @@
     const s = settingsOf(script);
     setHeader(script.title, '#/', `#/s/${script.id}/settings`);
     document.body.classList.add('playing');
+    prepareDictionary(script); // 準備ができるまでは、辞書なしで読み上げる
 
     view.innerHTML = `
       <section class="play">
@@ -1128,14 +1162,14 @@
     async perform(line, run) {
       const s = this.s;
       if (line.type !== 'speech') {
-        await Speech.speak(readAs(this.script, line.text), voiceFor(this.script, '__direction'));
+        await Speech.speak(spokenText(this.script, line.text), voiceFor(this.script, '__direction'));
         return;
       }
       // セリフの中の（カッコ書き）はト書きなので、ト書きを飛ばすときは読まない
       const text = s.readDirections ? line.text : line.text.replace(/[（(][^）)]*[）)]/g, '');
       const mine = isMine(this.script, line);
       if (!mine || s.readMine || !s.myChars.length) {
-        await Speech.speak(readAs(this.script, text), voiceFor(this.script, line.speakers[0]));
+        await Speech.speak(spokenText(this.script, text), voiceFor(this.script, line.speakers[0]));
         return;
       }
       await this.myTurn(line, text, run);
