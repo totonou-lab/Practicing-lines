@@ -126,6 +126,24 @@ main { max-width: 720px; margin: 0 auto; padding: 16px 16px calc(32px + var(--sa
 .howto .warn { color: var(--text); background: var(--mine); border-radius: 8px; padding: 8px 10px; }
 
 /* 設定画面 */
+.start-card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 14px 14px 10px; }
+.start-card h2 { margin-top: 16px; }
+.start-card .btn.big { margin-top: 18px; }
+.role-line { display: flex; align-items: center; gap: 10px; }
+.role-label { font-size: 14px; color: var(--muted); flex: none; }
+#role-names { flex: 1; min-width: 0; font-size: 18px; color: var(--accent); overflow-wrap: anywhere; }
+#role-box { margin-top: 8px; }
+.role-guide { margin-top: 0; }
+.summary-btn {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: var(--bg); border: 1px dashed var(--line); border-radius: var(--radius);
+  padding: 10px 12px; margin-top: 4px; font-size: 13px; color: var(--muted); line-height: 1.5;
+}
+.summary-btn .summary-link { display: block; margin-top: 4px; color: var(--accent); font-weight: 700; font-size: 14px; }
+.settings-panel { margin-top: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 4px 14px 14px; }
+.settings-panel > summary { cursor: pointer; padding: 12px 0; font-weight: 700; font-size: 16px; }
+.settings-panel > summary small { display: block; font-weight: normal; font-size: 12px; color: var(--muted); }
+.settings-panel h2:first-of-type { margin-top: 8px; }
 .merge-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .row-btns { display: flex; flex-wrap: wrap; gap: 8px; }
 .setup h2 { font-size: 15px; margin: 24px 0 8px; }

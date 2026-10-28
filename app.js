@@ -359,6 +359,13 @@
     return n;
   }
 
+  // 設定画面の上に出す、今の設定の要約
+  function settingsSummary(s) {
+    const mine = s.readMine ? '読み上げる' :
+      { mic: '声で判断して進む', time: '時間で進む', button: 'ボタンで進む' }[s.advance] + (s.showMine ? '' : '・隠す');
+    return `ト書き：${s.readDirections ? '読む' : '飛ばす'}　／　あなたのセリフ：${mine}　／　速さ：${s.rate.toFixed(1)}倍`;
+  }
+
   // マーカーの表示名。名前を付けていなければセリフの場所を使う
   function markerLabel(l) {
     return l.markerName || shortText(l);
@@ -408,9 +415,18 @@
     if (!scenes.some(l => l.id === s.startScene)) s.startScene = scenes[0] && scenes[0].id;
     if (!markers.some(l => l.id === s.startMarker)) s.startMarker = markers[0] && markers[0].id;
 
+    const firstTime = !s.practiced;
+    const noRole = !s.myChars.length;
     view.innerHTML = `
       <section class="setup">
-        <h2>あなたの役 <small>（複数選べます）</small></h2>
+        <div class="start-card">
+          <div class="role-line">
+            <span class="role-label">あなたの役</span>
+            <b id="role-names">${noRole ? '未選択' : esc(s.myChars.join('・'))}</b>
+            <button type="button" class="btn small" id="role-toggle" ${noRole ? 'hidden' : ''}>変える</button>
+          </div>
+          <div id="role-box" ${noRole ? '' : 'hidden'}>
+            <p class="hint role-guide">${noRole ? 'まず、あなたの役をタップしてください（2役以上も選べます）。' : '役をタップして選び直せます（2役以上も選べます）。'}</p>
         <div class="chips">
           ${script.characters.map(c => `<button type="button" class="chip ${s.myChars.includes(c) ? 'on' : ''}" data-char="${esc(c)}">${esc(c)}<small>${counts[c] || 0}</small></button>`).join('') || '<p class="hint">役が見つかりません。下の「台本の確認・修正」で直してください。</p>'}
         </div>
@@ -419,6 +435,69 @@
           ${undoButtonHtml(script)}
         </div>
 
+          </div>
+
+        <h2>練習する範囲</h2>
+        <div class="range-box">
+          <label class="field">始める場所
+            <select id="start-kind" class="full">
+              <option value="top">最初から</option>
+              ${available.resume ? `<option value="resume">続きから（${esc(shortText(posLine))}）</option>` : ''}
+              ${available.scene ? '<option value="scene">場面を選ぶ</option>' : ''}
+              ${available.page ? '<option value="page">ページを指定</option>' : ''}
+              ${available.marker ? '<option value="marker">🔖 マーカーから</option>' : ''}
+            </select></label>
+          <select id="start-scene" class="full" data-start="scene">
+            ${scenes.map(l => `<option value="${l.id}" ${l.id === s.startScene ? 'selected' : ''}>${esc(l.text)}${l.page ? `（p.${l.page}）` : ''}</option>`).join('')}
+          </select>
+          <label class="page-input" data-start="page"><input type="number" id="start-page" inputmode="numeric" min="1" max="${pages}" value="${Math.min(s.startPage, pages) || 1}"> ページ目から（全${pages}ページ）</label>
+          <select id="start-marker" class="full" data-start="marker">
+            ${markers.map(l => `<option value="${l.id}" ${l.id === s.startMarker ? 'selected' : ''}>🔖 ${esc(markerLabel(l))}</option>`).join('')}
+          </select>
+
+          <label class="field">終わる場所
+            <select id="end-kind" class="full">
+              <option value="end">最後まで</option>
+              ${available.scene ? '<option value="scene">その場面の終わりまで</option>' : ''}
+              ${available.marker ? '<option value="marker">次の 🔖 マーカーの手前まで</option>' : ''}
+              ${available.page ? '<option value="page">ページを指定</option>' : ''}
+            </select></label>
+          <label class="page-input" data-end="page"><input type="number" id="end-page" inputmode="numeric" min="1" max="${pages}" value="${Math.min(s.endPage, pages) || 1}"> ページ目の終わりまで</label>
+          <p class="hint">終わる場所まで来ると止まります。▶ を押すと、同じ範囲をもう一度練習できます。</p>
+          ${markers.length ? '' : '<p class="hint">🔖 練習画面の右下のボタンで、好きな行にマーカーを付けられます。</p>'}
+          ${!pages && /\.pdf$/i.test(script.fileName || '') ? '<p class="hint">ページで指定するには、この台本をもう一度読み込んでください。</p>' : ''}
+        </div>
+
+        ${markers.length ? `
+        <details class="markers" id="markers">
+          <summary>🔖 マーカーの一覧（${markers.length}）</summary>
+          <ul>${markers.map(l => `
+            <li data-id="${l.id}">
+              <div class="mk-text">
+                <span class="mk-name">${esc(markerLabel(l))}</span>
+                ${l.markerName ? `<span class="mk-where">${esc(shortText(l))}</span>` : ''}
+              </div>
+              <div class="mk-btns">
+                <button type="button" class="btn small primary mk-play">▶ ここから練習</button>
+                <button type="button" class="btn small mk-rename">名前</button>
+                <button type="button" class="btn small danger mk-delete">削除</button>
+              </div>
+            </li>`).join('')}
+          </ul>
+          <button type="button" class="btn small danger" id="mk-clear">すべて削除</button>
+        </details>` : ''}
+
+          <button type="button" class="btn primary big" id="go">▶ 練習を始める</button>
+
+          <button type="button" class="summary-btn" id="open-settings">
+            <span id="settings-summary">${esc(settingsSummary(s))}</span>
+            <span class="summary-link">⚙ 設定を変える</span>
+          </button>
+        </div>
+
+        <details class="settings-panel" id="settings-panel" ${fromPlay || firstTime ? 'open' : ''}>
+          <summary>⚙ 練習の設定<small>ト書き・あなたのセリフ・進み方・読み方・声</small></summary>
+          ${firstTime ? '<p class="hint">はじめて使うときは、ここで練習のしかたを決めましょう。あとからいつでも変えられます。</p>' : ''}
         <h2>ト書き</h2>
         ${segmented('readDirections', [[true, '読む'], [false, '飛ばす']], s.readDirections)}
 
@@ -495,57 +574,7 @@
           </div>
         </details>
 
-        <h2>練習する範囲</h2>
-        <div class="range-box">
-          <label class="field">始める場所
-            <select id="start-kind" class="full">
-              <option value="top">最初から</option>
-              ${available.resume ? `<option value="resume">続きから（${esc(shortText(posLine))}）</option>` : ''}
-              ${available.scene ? '<option value="scene">場面を選ぶ</option>' : ''}
-              ${available.page ? '<option value="page">ページを指定</option>' : ''}
-              ${available.marker ? '<option value="marker">🔖 マーカーから</option>' : ''}
-            </select></label>
-          <select id="start-scene" class="full" data-start="scene">
-            ${scenes.map(l => `<option value="${l.id}" ${l.id === s.startScene ? 'selected' : ''}>${esc(l.text)}${l.page ? `（p.${l.page}）` : ''}</option>`).join('')}
-          </select>
-          <label class="page-input" data-start="page"><input type="number" id="start-page" inputmode="numeric" min="1" max="${pages}" value="${Math.min(s.startPage, pages) || 1}"> ページ目から（全${pages}ページ）</label>
-          <select id="start-marker" class="full" data-start="marker">
-            ${markers.map(l => `<option value="${l.id}" ${l.id === s.startMarker ? 'selected' : ''}>🔖 ${esc(markerLabel(l))}</option>`).join('')}
-          </select>
-
-          <label class="field">終わる場所
-            <select id="end-kind" class="full">
-              <option value="end">最後まで</option>
-              ${available.scene ? '<option value="scene">その場面の終わりまで</option>' : ''}
-              ${available.marker ? '<option value="marker">次の 🔖 マーカーの手前まで</option>' : ''}
-              ${available.page ? '<option value="page">ページを指定</option>' : ''}
-            </select></label>
-          <label class="page-input" data-end="page"><input type="number" id="end-page" inputmode="numeric" min="1" max="${pages}" value="${Math.min(s.endPage, pages) || 1}"> ページ目の終わりまで</label>
-          <p class="hint">終わる場所まで来ると止まります。▶ を押すと、同じ範囲をもう一度練習できます。</p>
-          ${markers.length ? '' : '<p class="hint">🔖 練習画面の右下のボタンで、好きな行にマーカーを付けられます。</p>'}
-          ${!pages && /\.pdf$/i.test(script.fileName || '') ? '<p class="hint">ページで指定するには、この台本をもう一度読み込んでください。</p>' : ''}
-        </div>
-
-        ${markers.length ? `
-        <details class="markers" id="markers">
-          <summary>🔖 マーカーの一覧（${markers.length}）</summary>
-          <ul>${markers.map(l => `
-            <li data-id="${l.id}">
-              <div class="mk-text">
-                <span class="mk-name">${esc(markerLabel(l))}</span>
-                ${l.markerName ? `<span class="mk-where">${esc(shortText(l))}</span>` : ''}
-              </div>
-              <div class="mk-btns">
-                <button type="button" class="btn small primary mk-play">▶ ここから練習</button>
-                <button type="button" class="btn small mk-rename">名前</button>
-                <button type="button" class="btn small danger mk-delete">削除</button>
-              </div>
-            </li>`).join('')}
-          </ul>
-          <button type="button" class="btn small danger" id="mk-clear">すべて削除</button>
-        </details>` : ''}
-
-        <button type="button" class="btn primary big" id="go">▶ 練習を始める</button>
+        </details>
 
         <div class="links">
           <a href="#/s/${script.id}/edit" class="btn">台本の確認・修正</a>
@@ -562,13 +591,28 @@
     prepareDictionary(script);
     if (s.dictReading && Reading.isReady()) $('#dict-status').textContent = '辞書の準備ができています';
 
+    // 描き直しても、開いていた箱（マーカー・設定・役の一覧）はそのままにする
     const rerender = () => {
       const y = window.scrollY;
-      const markersOpen = $('#markers') && $('#markers').open;
+      const openIds = ['markers', 'settings-panel', 'readings'].filter(id => $('#' + id) && $('#' + id).open);
+      const rolesOpen = !$('#role-box').hidden;
       renderSetup(script, fromPlay);
-      if (markersOpen && $('#markers')) $('#markers').open = true;
+      for (const id of ['markers', 'settings-panel', 'readings']) if ($('#' + id)) $('#' + id).open = openIds.includes(id);
+      if (rolesOpen) showRoles(true);
       window.scrollTo(0, y);
     };
+
+    const showRoles = open => {
+      $('#role-box').hidden = !open;
+      $('#role-toggle').textContent = open ? '閉じる' : '変える';
+    };
+    $('#role-toggle').addEventListener('click', () => showRoles($('#role-box').hidden));
+    const refreshSummary = () => { $('#settings-summary').textContent = settingsSummary(s); };
+    $('#open-settings').addEventListener('click', () => {
+      const panel = $('#settings-panel');
+      panel.open = true;
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
 
     // マーカーの一覧
     const lineById = id => script.lines.find(l => l.id === id);
@@ -624,6 +668,8 @@
       const c = b.dataset.char;
       s.myChars = s.myChars.includes(c) ? s.myChars.filter(x => x !== c) : [...s.myChars, c];
       b.classList.toggle('on');
+      $('#role-names').textContent = s.myChars.length ? s.myChars.join('・') : '未選択';
+      $('#role-toggle').hidden = false;
       save(script);
     }));
 
@@ -634,6 +680,7 @@
       s[seg.dataset.name] = raw === 'true' ? true : raw === 'false' ? false : raw;
       seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
       updateVisibility();
+      refreshSummary();
       if (seg.dataset.name === 'dictReading') {
         if (s.dictReading) prepareDictionary(script);
         else $('#dict-status').textContent = '';
@@ -644,6 +691,7 @@
     view.querySelectorAll('input[data-setting]').forEach(inp => inp.addEventListener('input', () => {
       s[inp.dataset.setting] = parseFloat(inp.value);
       inp.previousElementSibling.textContent = parseFloat(inp.value).toFixed(1) + inp.dataset.unit;
+      refreshSummary();
       saveSoon(script);
     }));
 
@@ -738,6 +786,7 @@
       s.position = start;
       s.rangeStart = start;
       s.stopAt = stop < script.lines.length ? stop : null;
+      s.practiced = true; // 次からは「練習の設定」を閉じた状態で表示する
       save(script).then(() => { location.hash = `#/s/${script.id}/play`; });
     });
 
